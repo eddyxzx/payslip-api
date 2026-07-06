@@ -162,8 +162,12 @@
 
   .ledger-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
   .ledger-head .section-label { margin: 0; }
-  .clear-btn { background: none; border: none; color: var(--faint); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; padding: 2px 4px; }
-  .clear-btn:hover { color: var(--muted); }
+  .ledger-count { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+  .pager { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .page-btn { min-width: 30px; height: 30px; padding: 0 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; color: var(--muted); font-family: var(--mono); font-size: 12px; cursor: pointer; transition: border-color 0.15s ease, color 0.15s ease; }
+  .page-btn:hover { color: var(--text); border-color: var(--faint); }
+  .page-btn.active { background: var(--emerald-soft); border-color: var(--emerald); color: var(--emerald); }
+  .page-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
   .ledger { display: flex; flex-direction: column; gap: 1px; background: var(--line-soft); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .ledger-row { display: grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items: center; padding: 13px 16px; background: var(--surface); }
   .ledger-row .who { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -264,10 +268,11 @@
 
   <section class="reveal">
     <div class="ledger-head">
-      <p class="section-label">Ledger — saved calculations</p>
-      <button class="clear-btn" id="clear" type="button">Clear</button>
+      <p class="section-label">Ledger — everyone's calculations</p>
+      <span class="ledger-count" id="ledger-count"></span>
     </div>
     <div class="ledger" id="ledger-list"></div>
+    <div class="pager" id="pager"></div>
   </section>
 
   <footer class="reveal">
@@ -381,46 +386,81 @@
     render(parseSalary());
   });
 
-  const KEY = "payslip.ledger.v1";
-  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
-  const save = list => { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {} };
+  // The API is served under the same path prefix this page is mounted at.
+  const API_BASE = "/payslip-api/";
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-  function timeAgo(ts) {
-    const s = Math.floor((Date.now() - ts) / 1000);
+  function timeAgo(iso) {
+    const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (!isFinite(s) || s < 0) return "";
     if (s < 60) return "just now";
     if (s < 3600) return Math.floor(s / 60) + "m ago";
     if (s < 86400) return Math.floor(s / 3600) + "h ago";
     return Math.floor(s / 86400) + "d ago";
   }
-  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-  function renderLedger() {
-    const list = load(), el = $("ledger-list");
-    if (!list.length) { el.innerHTML = '<div class="ledger-empty">No saved calculations yet. Add one from the form above.</div>'; return; }
-    el.innerHTML = list.map(x =>
-      '<div class="ledger-row"><span class="who">' + escapeHtml(x.name || "Unnamed") + '</span>' +
-      '<span class="when">' + timeAgo(x.ts) + '</span>' +
-      '<span class="amt">' + money(x.netMo) + '<small>NET /MO</small></span></div>'
-    ).join("");
+  function renderPager(p) {
+    const pager = $("pager");
+    if (!p || p.total_pages <= 1) { pager.innerHTML = ""; return; }
+    let html = "";
+    for (let i = 1; i <= p.total_pages; i++) {
+      html += '<button class="page-btn' + (i === p.page ? " active" : "") + '" data-page="' + i + '">' + i + "</button>";
+    }
+    pager.innerHTML = html;
+    pager.querySelectorAll(".page-btn").forEach(b => b.addEventListener("click", () => loadLedger(Number(b.dataset.page))));
   }
 
-  $("form").addEventListener("submit", e => {
+  async function loadLedger(page) {
+    page = page || 1;
+    const el = $("ledger-list");
+    try {
+      const res = await fetch(API_BASE + "payslips?page=" + page, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error("status " + res.status);
+      const data = await res.json();
+      const list = data.salary_computations || [];
+      $("ledger-count").textContent = data.pagination ? data.pagination.total_count + " saved" : "";
+      if (!list.length) {
+        el.innerHTML = '<div class="ledger-empty">No calculations saved yet — be the first to add one above.</div>';
+      } else {
+        el.innerHTML = list.map(x =>
+          '<div class="ledger-row"><span class="who">' + escapeHtml(x.employee_name || "Anonymous") + "</span>" +
+          '<span class="when">' + timeAgo(x.time_stamp) + "</span>" +
+          '<span class="amt">$' + x.monthly_income_tax + '<small>TAX /MO</small></span></div>'
+        ).join("");
+      }
+      renderPager(data.pagination);
+    } catch (err) {
+      el.innerHTML = '<div class="ledger-empty">The shared ledger loads when the API is reachable.</div>';
+      $("pager").innerHTML = "";
+      $("ledger-count").textContent = "";
+    }
+  }
+
+  $("form").addEventListener("submit", async e => {
     e.preventDefault();
     const salary = parseSalary();
     if (salary <= 0) { salaryInput.focus(); return; }
-    const r = compute(salary);
-    const list = load();
-    list.unshift({ name: nameInput.value.trim(), salary, netMo: r.netMo, ts: Date.now() });
-    save(list.slice(0, 8));
-    renderLedger();
-    const btn = $("save"); btn.textContent = "Added ✓";
-    setTimeout(() => { btn.textContent = "Add to ledger"; }, 1400);
+    const btn = $("save");
+    btn.disabled = true;
+    try {
+      const res = await fetch(API_BASE + "payslips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ employee_name: nameInput.value.trim() || "Anonymous", annual_salary: salary }),
+      });
+      if (res.ok) { btn.textContent = "Added ✓"; await loadLedger(1); }
+      else {
+        const err = await res.json().catch(() => ({}));
+        btn.textContent = (err.errors && err.errors[0]) ? "✕ " + err.errors[0] : "Couldn't save";
+      }
+    } catch (err) {
+      btn.textContent = "Offline — not saved";
+    }
+    setTimeout(() => { btn.textContent = "Add to ledger"; btn.disabled = false; }, 1800);
   });
 
-  $("clear").addEventListener("click", () => { save([]); renderLedger(); });
-
   render(parseSalary());
-  renderLedger();
+  loadLedger(1);
 </script>
 </body>
 </html>

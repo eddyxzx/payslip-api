@@ -84,3 +84,17 @@ RSpec.describe "GET /payslips/breakdown", type: :request do
     expect(body["brackets"][2]).to eq("range" => "40001-80000", "rate" => "20%", "tax" => "4000.00")
   end
 end
+
+RSpec.describe "GET /payslips pagination", type: :request do
+  it "paginates results and reports totals" do
+    12.times { |i| SalaryComputation.create!(employee_name: "E#{i}", annual_salary: 60000, monthly_income_tax: 500) }
+
+    get "/payslips", params: { page: 2 }
+
+    body = JSON.parse(response.body)
+    expect(body["salary_computations"].size).to eq(6)
+    expect(body["pagination"]).to include(
+      "page" => 2, "per_page" => 6, "total_count" => 12, "total_pages" => 2
+    )
+  end
+end
