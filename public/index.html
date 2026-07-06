@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Payslip Engine — Progressive Income Tax</title>
+<meta name="description" content="Interactive progressive income-tax payslip calculator, backed by a Ruby on Rails REST API." />
+<style>
+  :root {
+    --bg: #0C1512;
+    --surface: #101E19;
+    --surface-2: #16261F;
+    --line: #22342B;
+    --line-soft: #1A2922;
+    --text: #EAF1EC;
+    --muted: #8CA396;
+    --faint: #5D7268;
+    --gold: #E7B667;
+    --emerald: #46DBA4;
+    --emerald-soft: rgba(70, 219, 164, 0.12);
+
+    --r0: #52756A;
+    --r10: #6FAE8C;
+    --r20: #CBBE5A;
+    --r30: #DB9556;
+    --r40: #CE5D48;
+
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 600px at 78% -10%, rgba(70,219,164,0.06), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(231,182,103,0.05), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(28px, 5vw, 72px) clamp(20px, 4vw, 40px) 64px;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(28px, 4vw, 44px);
+  }
+
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .hero { display: flex; flex-direction: column; gap: 14px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--emerald);
+    margin: 0;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before { content: ""; width: 26px; height: 1px; background: var(--emerald); opacity: 0.6; }
+  h1 {
+    margin: 0;
+    font-size: clamp(30px, 5.4vw, 54px);
+    line-height: 1.04;
+    letter-spacing: -0.022em;
+    font-weight: 620;
+    text-wrap: balance;
+    max-width: 16ch;
+  }
+  h1 .accent { color: var(--gold); }
+  .lede { margin: 2px 0 0; color: var(--muted); font-size: clamp(15px, 1.6vw, 17px); max-width: 56ch; }
+
+  .workbench {
+    display: grid;
+    grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+    gap: clamp(16px, 2.4vw, 22px);
+    align-items: stretch;
+  }
+  @media (max-width: 780px) { .workbench { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: linear-gradient(180deg, var(--surface), #0E1B16);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: clamp(20px, 2.6vw, 28px);
+  }
+
+  .field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 18px; }
+  .field label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); }
+  .field input {
+    width: 100%; background: var(--surface-2); border: 1px solid var(--line); border-radius: 9px;
+    color: var(--text); padding: 12px 13px; font-family: var(--sans); font-size: 15px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .salary-field { position: relative; }
+  .salary-field .sign { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: var(--gold); font-family: var(--mono); font-size: 17px; pointer-events: none; }
+  .salary-field input { padding-left: 28px; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 20px; letter-spacing: 0.01em; }
+  input:focus { outline: none; border-color: var(--emerald); box-shadow: 0 0 0 3px var(--emerald-soft); }
+  input::placeholder { color: var(--faint); }
+
+  .save-btn {
+    width: 100%; margin-top: 2px; background: var(--emerald); color: #052018; border: none; border-radius: 9px;
+    padding: 12px 16px; font-family: var(--sans); font-weight: 640; font-size: 14px; letter-spacing: 0.01em;
+    cursor: pointer; transition: transform 0.12s ease, background 0.15s ease;
+  }
+  .save-btn:hover { background: #5EE7B3; }
+  .save-btn:active { transform: translateY(1px); }
+  .save-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .figures { display: flex; flex-direction: column; }
+  .figure { display: flex; align-items: baseline; justify-content: space-between; padding: 13px 0; border-bottom: 1px solid var(--line-soft); gap: 12px; }
+  .figure:last-child { border-bottom: none; }
+  .figure .k { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .figure .v { font-size: 17px; color: var(--text); }
+  .figure.net .k { color: var(--text); font-weight: 600; }
+  .figure.net .v { font-size: 26px; color: var(--gold); font-weight: 600; }
+  .figures .period { font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.1em; }
+
+  .viz-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
+  .viz-title { font-size: 13px; color: var(--muted); margin: 0; }
+  .viz-eff { display: flex; align-items: baseline; gap: 7px; }
+  .viz-eff .v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 22px; color: var(--emerald); font-weight: 600; }
+  .viz-eff .k { font-size: 11px; color: var(--faint); font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+
+  .ladder-wrap { display: flex; flex-direction: column; gap: 10px; }
+  .ladder { display: flex; width: 100%; height: 168px; gap: 3px; border-radius: 8px; overflow: hidden; background: var(--surface-2); }
+  .seg { position: relative; flex-grow: 0; flex-basis: 0; min-width: 0; transition: flex-grow 0.55s cubic-bezier(0.22, 0.61, 0.36, 1); overflow: hidden; }
+  .seg .fill { position: absolute; inset: 0; background: linear-gradient(to bottom, var(--c) var(--rate), color-mix(in srgb, var(--c) 22%, transparent) var(--rate)); }
+  .seg .tag { position: absolute; left: 8px; bottom: 8px; right: 8px; font-family: var(--mono); font-size: 10px; color: rgba(255,255,255,0.92); text-shadow: 0 1px 2px rgba(0,0,0,0.4); letter-spacing: 0.02em; opacity: 0; transition: opacity 0.3s ease 0.2s; pointer-events: none; }
+  .seg.show .tag { opacity: 1; }
+  .ladder-axis { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--faint); letter-spacing: 0.04em; }
+  .ladder-legend { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-top: 4px; }
+  .legend-item { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+  .legend-item .dot { width: 9px; height: 9px; border-radius: 2px; }
+  .legend-item .num { font-size: 11px; color: var(--faint); }
+
+  .section-label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
+  .table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; min-width: 460px; }
+  thead th { text-align: right; font-weight: 500; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  thead th:first-child { text-align: left; }
+  tbody td { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); text-align: right; font-size: 14px; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td:first-child { text-align: left; }
+  tbody td.num { color: var(--text); }
+  .band-name { display: flex; align-items: center; gap: 10px; }
+  .band-name .dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
+  .band-name .rng { font-family: var(--mono); font-size: 13px; }
+  .rate-cell { color: var(--muted); }
+  tr.dim td { color: var(--faint); }
+  tr.dim td.num { color: var(--faint); }
+  tfoot td { padding: 13px 16px; font-size: 14px; text-align: right; border-top: 1px solid var(--line); }
+  tfoot td:first-child { text-align: left; color: var(--muted); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+  tfoot .total { color: var(--gold); font-weight: 600; }
+
+  .ledger-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .ledger-head .section-label { margin: 0; }
+  .clear-btn { background: none; border: none; color: var(--faint); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; padding: 2px 4px; }
+  .clear-btn:hover { color: var(--muted); }
+  .ledger { display: flex; flex-direction: column; gap: 1px; background: var(--line-soft); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .ledger-row { display: grid; grid-template-columns: 1fr auto auto; gap: 16px; align-items: center; padding: 13px 16px; background: var(--surface); }
+  .ledger-row .who { font-size: 14px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ledger-row .when { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .ledger-row .amt { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 14px; color: var(--gold); text-align: right; }
+  .ledger-row .amt small { color: var(--faint); font-size: 10px; letter-spacing: 0.08em; display: block; }
+  .ledger-empty { padding: 22px 16px; text-align: center; color: var(--faint); font-size: 13px; background: var(--surface); }
+
+  footer { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding-top: 22px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 13px; }
+  footer a { color: var(--muted); text-decoration: none; border-bottom: 1px solid var(--line); }
+  footer a:hover { color: var(--emerald); border-color: var(--emerald); }
+  footer .stack { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; }
+
+  .reveal { opacity: 0; transform: translateY(10px); animation: rise 0.6s cubic-bezier(0.22,0.61,0.36,1) forwards; }
+  .reveal:nth-child(2) { animation-delay: 0.06s; }
+  .reveal:nth-child(3) { animation-delay: 0.12s; }
+  .reveal:nth-child(4) { animation-delay: 0.18s; }
+  .reveal:nth-child(5) { animation-delay: 0.24s; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { animation: none; opacity: 1; transform: none; }
+    .seg, .seg .tag { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero reveal">
+    <p class="eyebrow">Payslip Engine</p>
+    <h1>Every dollar, taxed in <span class="accent">its own band</span>.</h1>
+    <p class="lede">Progressive tax doesn't hit your whole salary at one rate. Enter an annual salary and watch it split across brackets — each slice taxed at its own rate, then rolled into a monthly payslip.</p>
+  </header>
+
+  <section class="workbench reveal">
+    <div class="panel">
+      <form id="form" autocomplete="off">
+        <div class="field">
+          <label for="name">Employee name</label>
+          <input id="name" type="text" placeholder="e.g. Ren" value="Ren" maxlength="60" />
+        </div>
+        <div class="field">
+          <label for="salary">Annual salary</label>
+          <div class="salary-field">
+            <span class="sign">$</span>
+            <input id="salary" type="text" inputmode="numeric" placeholder="60,000" value="60,000" />
+          </div>
+        </div>
+        <button class="save-btn" type="submit" id="save">Add to ledger</button>
+      </form>
+
+      <div class="figures" style="margin-top: 22px;">
+        <div class="figure">
+          <span class="k">Gross monthly <span class="period">/MO</span></span>
+          <span class="v num" id="f-gross">$0.00</span>
+        </div>
+        <div class="figure">
+          <span class="k">Income tax <span class="period">/MO</span></span>
+          <span class="v num" id="f-tax">$0.00</span>
+        </div>
+        <div class="figure net">
+          <span class="k">Net monthly</span>
+          <span class="v num" id="f-net">$0.00</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="viz-head">
+        <p class="viz-title">How the salary is taxed, band by band</p>
+        <div class="viz-eff">
+          <span class="v num" id="eff">0.0%</span>
+          <span class="k">effective</span>
+        </div>
+      </div>
+      <div class="ladder-wrap">
+        <div class="ladder" id="ladder"></div>
+        <div class="ladder-axis"><span>$0</span><span id="axis-max" class="num">$60,000</span></div>
+        <div class="ladder-legend" id="legend"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="reveal">
+    <p class="section-label">Tax breakdown</p>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Bracket</th><th>Rate</th><th>Taxable</th><th>Tax</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+        <tfoot>
+          <tr><td>Total annual tax</td><td></td><td class="num" id="t-taxable">$0</td><td class="num total" id="t-tax">$0.00</td></tr>
+        </tfoot>
+      </table>
+    </div>
+  </section>
+
+  <section class="reveal">
+    <div class="ledger-head">
+      <p class="section-label">Ledger — saved calculations</p>
+      <button class="clear-btn" id="clear" type="button">Clear</button>
+    </div>
+    <div class="ledger" id="ledger-list"></div>
+  </section>
+
+  <footer class="reveal">
+    <span>Client-side mirror of a <strong style="color:var(--muted);font-weight:600;">Ruby on Rails</strong> REST API.</span>
+    <span class="stack">RAILS · RSPEC · SQLITE</span>
+    <a href="https://github.com/eddyxzx/payslip-api" target="_blank" rel="noopener">View source →</a>
+  </footer>
+</div>
+
+<script>
+  "use strict";
+
+  const BRACKETS = [
+    { floor: 0,      ceiling: 20000,   rate: 0,  varc: "--r0"  },
+    { floor: 20000,  ceiling: 40000,   rate: 10, varc: "--r10" },
+    { floor: 40000,  ceiling: 80000,   rate: 20, varc: "--r20" },
+    { floor: 80000,  ceiling: 180000,  rate: 30, varc: "--r30" },
+    { floor: 180000, ceiling: Infinity, rate: 40, varc: "--r40" },
+  ];
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function taxableIn(salary, b) { return Math.max(0, Math.min(salary, b.ceiling) - b.floor); }
+
+  function compute(salary) {
+    const bands = BRACKETS.map(b => {
+      const taxable = taxableIn(salary, b);
+      return { ...b, taxable, tax: taxable * b.rate / 100 };
+    });
+    const annualTax = bands.reduce((s, x) => s + x.tax, 0);
+    return { salary, bands, annualTax, grossMo: salary / 12, taxMo: annualTax / 12, netMo: (salary - annualTax) / 12, effective: salary > 0 ? annualTax / salary * 100 : 0 };
+  }
+
+  const money = n => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const money0 = n => "$" + Math.round(n).toLocaleString("en-US");
+  const rangeLabel = b => b.ceiling === Infinity
+    ? (b.floor + 1).toLocaleString("en-US") + "+"
+    : (b.floor === 0 ? "0" : (b.floor + 1).toLocaleString("en-US")) + "–" + b.ceiling.toLocaleString("en-US");
+
+  const tweens = new WeakMap();
+  function setMoney(el, value) {
+    if (reduceMotion) { el.textContent = money(value); return; }
+    const from = tweens.get(el) ?? 0;
+    const start = performance.now(), dur = 480;
+    function step(now) {
+      const t = Math.min(1, (now - start) / dur);
+      const e = 1 - Math.pow(1 - t, 3);
+      el.textContent = money(from + (value - from) * e);
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+    tweens.set(el, value);
+  }
+
+  const $ = id => document.getElementById(id);
+  const ladder = $("ladder"), rows = $("rows"), legend = $("legend");
+  const css = getComputedStyle(document.documentElement);
+
+  BRACKETS.forEach(b => {
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    seg.style.setProperty("--c", css.getPropertyValue(b.varc).trim());
+    seg.style.setProperty("--rate", b.rate + "%");
+    seg.innerHTML = '<div class="fill"></div><div class="tag"></div>';
+    seg.title = rangeLabel(b) + " · " + b.rate + "%";
+    ladder.appendChild(seg);
+
+    const li = document.createElement("div");
+    li.className = "legend-item";
+    li.innerHTML = '<span class="dot" style="background:' + css.getPropertyValue(b.varc).trim() + '"></span>' +
+      '<span class="num">' + b.rate + '%</span><span>' + rangeLabel(b) + '</span>';
+    legend.appendChild(li);
+  });
+  const segEls = [...ladder.querySelectorAll(".seg")];
+
+  function render(salary) {
+    const r = compute(salary);
+    setMoney($("f-gross"), r.grossMo);
+    setMoney($("f-tax"), r.taxMo);
+    setMoney($("f-net"), r.netMo);
+    $("eff").textContent = r.effective.toFixed(1) + "%";
+    $("axis-max").textContent = money0(salary);
+    $("t-taxable").textContent = money0(salary);
+    setMoney($("t-tax"), r.annualTax);
+
+    r.bands.forEach((band, i) => {
+      const seg = segEls[i];
+      seg.style.flexGrow = band.taxable;
+      seg.classList.toggle("show", salary > 0 && band.taxable / salary > 0.11);
+      seg.querySelector(".tag").textContent = money0(band.tax);
+    });
+
+    rows.innerHTML = r.bands.map(band => {
+      const c = css.getPropertyValue(band.varc).trim();
+      const dim = band.taxable === 0 ? " class=\"dim\"" : "";
+      return "<tr" + dim + ">" +
+        '<td><span class="band-name"><span class="dot" style="background:' + c + '"></span>' +
+          '<span class="rng">' + rangeLabel(band) + "</span></span></td>" +
+        '<td class="rate-cell">' + band.rate + "%</td>" +
+        '<td class="num">' + money0(band.taxable) + "</td>" +
+        '<td class="num">' + money(band.tax) + "</td></tr>";
+    }).join("");
+  }
+
+  const salaryInput = $("salary"), nameInput = $("name");
+  function parseSalary() { return Math.max(0, parseInt(salaryInput.value.replace(/[^0-9]/g, ""), 10) || 0); }
+  function reformat() { const n = parseSalary(); salaryInput.value = n ? n.toLocaleString("en-US") : ""; }
+  salaryInput.addEventListener("input", () => {
+    const caretEnd = salaryInput.selectionStart === salaryInput.value.length;
+    reformat();
+    if (caretEnd) salaryInput.setSelectionRange(salaryInput.value.length, salaryInput.value.length);
+    render(parseSalary());
+  });
+
+  const KEY = "payslip.ledger.v1";
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } };
+  const save = list => { try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) {} };
+
+  function timeAgo(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return "just now";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  function renderLedger() {
+    const list = load(), el = $("ledger-list");
+    if (!list.length) { el.innerHTML = '<div class="ledger-empty">No saved calculations yet. Add one from the form above.</div>'; return; }
+    el.innerHTML = list.map(x =>
+      '<div class="ledger-row"><span class="who">' + escapeHtml(x.name || "Unnamed") + '</span>' +
+      '<span class="when">' + timeAgo(x.ts) + '</span>' +
+      '<span class="amt">' + money(x.netMo) + '<small>NET /MO</small></span></div>'
+    ).join("");
+  }
+
+  $("form").addEventListener("submit", e => {
+    e.preventDefault();
+    const salary = parseSalary();
+    if (salary <= 0) { salaryInput.focus(); return; }
+    const r = compute(salary);
+    const list = load();
+    list.unshift({ name: nameInput.value.trim(), salary, netMo: r.netMo, ts: Date.now() });
+    save(list.slice(0, 8));
+    renderLedger();
+    const btn = $("save"); btn.textContent = "Added ✓";
+    setTimeout(() => { btn.textContent = "Add to ledger"; }, 1400);
+  });
+
+  $("clear").addEventListener("click", () => { save([]); renderLedger(); });
+
+  render(parseSalary());
+  renderLedger();
+</script>
+</body>
+</html>
